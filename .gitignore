@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# --- Project Specific Data ---
+uploads/
+qdrant_storage/
+*.pdf
+
+# --- Secrets ---
+.env
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+.DS_Store
