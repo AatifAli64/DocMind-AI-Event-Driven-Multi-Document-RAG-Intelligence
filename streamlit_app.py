@@ -20,25 +20,81 @@ if "last_uploaded" not in st.session_state:
 #CSS STYLING
 st.markdown("""
     <style>
-    .answer-card {
-        background-color: #1E293B;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #6366F1;
-        margin: 20px 0;
+    /* 1. MAIN BACKGROUND: Deep Navy with a "Shiny" Gradient */
+    .stApp {
+        background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 100%);
+        color: #e2e8f0;
     }
-    .answer-card p { color: #E2E8F0; font-size: 1.1rem; }
-    .source-tag {
-        background-color: #475569;
+
+    /* 2. SIDEBAR: Darker, Solid Navy */
+    section[data-testid="stSidebar"] {
+        background-color: #020617;
+        border-right: 1px solid #1e293b;
+    }
+
+    /* 3. HEADERS: Gradient Text (The "Shiny" Effect on Titles) */
+    h1, h2, h3 {
+        background: linear-gradient(90deg, #60a5fa, #c084fc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800 !important;
+    }
+
+    /* 4. ANSWER CARD: Glassmorphism (See-through glass effect) */
+    .answer-card {
+        background: rgba(30, 41, 59, 0.7); /* Semi-transparent navy */
+        backdrop-filter: blur(12px);       /* Blurs what's behind it */
+        padding: 25px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1); /* Subtle white border */
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); /* Deep shadow */
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    .answer-card p {
+        color: #f1f5f9 !important; /* Bright white-gray text */
+        font-size: 1.1rem;
+        line-height: 1.6;
+    }
+
+    /* 5. BUTTONS: Glowing Gradient */
+    .stButton>button {
+        background: linear-gradient(90deg, #4f46e5, #7c3aed); /* Indigo to Purple */
+        color: white !important;
+        border: none;
+        border-radius: 12px;
+        height: 50px;
+        font-weight: bold;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4); /* Glowing purple shadow */
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(124, 58, 237, 0.6);
+    }
+
+    /* 6. INPUT FIELDS: Clean Dark Blue */
+    .stTextInput>div>div>input {
+        background-color: #1e293b;
         color: white;
-        padding: 4px 12px;
-        border-radius: 15px;
+        border: 1px solid #475569;
+        border-radius: 10px;
+    }
+    
+    /* 7. SOURCE TAGS: Neon Cyan Capsules */
+    .source-tag {
+        background-color: rgba(6, 182, 212, 0.15); /* Transparent Cyan */
+        color: #22d3ee !important; /* Bright Cyan Text */
+        padding: 5px 12px;
+        border-radius: 20px;
         font-size: 0.8rem;
-        margin-right: 5px;
-        border: 1px solid #6366F1;
+        border: 1px solid #0891b2;
+        margin-right: 8px;
+        display: inline-block;
+        margin-top: 5px;
     }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 @st.cache_resource
 def get_inngest_client():
