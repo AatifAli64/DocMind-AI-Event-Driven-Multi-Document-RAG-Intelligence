@@ -7,158 +7,172 @@ from dotenv import load_dotenv
 import os
 import requests
 
-# Load environment and set theme-friendly config
+#Loading environment
 load_dotenv()
-st.set_page_config(
-    page_title="AI Document Intelligence", 
-    page_icon="🧪", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="DocMind AI", page_icon="🤖", layout="wide")
 
-# --- CUSTOM CSS (Fixed for Dark/Light Mode Visibility) ---
+#SESSION STATE
+if "uploaded_files" not in st.session_state:
+    st.session_state.uploaded_files = []
+if "last_uploaded" not in st.session_state:
+    st.session_state.last_uploaded = None
+
+#CSS STYLING
 st.markdown("""
     <style>
-    /* Fixed Answer Card: Dark Background with White Text for 100% Visibility */
     .answer-card {
-        background-color: #1E293B !important; /* Deep Navy Blue */
-        padding: 30px;
-        border-radius: 12px;
-        border-left: 8px solid #4F46E5; /* Bright Indigo Accent */
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-        margin-top: 25px;
-        margin-bottom: 25px;
+        background-color: #1E293B;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #6366F1;
+        margin: 20px 0;
     }
-    .answer-card h3 {
-        color: #F8FAFC !important; /* Off-White Header */
-        margin-top: 0 !important;
-        font-weight: 700 !important;
-    }
-    .answer-card p, .answer-card li {
-        color: #E2E8F0 !important; /* Light Gray Body Text */
-        line-height: 1.8 !important;
-        font-size: 1.1rem !important;
-    }
-    
-    /* Button Styling */
-    .stButton>button {
-        width: 100%;
-        border-radius: 8px;
-        height: 3.5em;
-        background-color: #4F46E5;
-        color: white !important;
-        font-weight: bold;
-        border: none;
-    }
-    
-    /* Source Tags */
+    .answer-card p { color: #E2E8F0; font-size: 1.1rem; }
     .source-tag {
-        display: inline-block;
-        background-color: #4F46E5;
-        color: white !important;
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        margin-right: 8px;
-        margin-bottom: 8px;
+        background-color: #475569;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 15px;
+        font-size: 0.8rem;
+        margin-right: 5px;
         border: 1px solid #6366F1;
     }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# --- LOGIC FUNCTIONS ---
 @st.cache_resource
-def get_inngest_client() -> inngest.Inngest:
+def get_inngest_client():
     return inngest.Inngest(app_id="rag_app", is_production=False)
 
-def save_uploaded_pdf(file) -> Path:
+def save_uploaded_pdf(file):
     uploads_dir = Path("uploads")
     uploads_dir.mkdir(parents=True, exist_ok=True)
     file_path = uploads_dir / file.name
     file_path.write_bytes(file.getbuffer())
     return file_path
 
-async def send_rag_ingest_event(pdf_path: Path) -> None:
+async def send_ingest(pdf_path):
     client = get_inngest_client()
     await client.send(inngest.Event(
         name="rag/ingest_pdf",
         data={"pdf_path": str(pdf_path.resolve()), "source_id": pdf_path.name}
     ))
 
-async def send_rag_query_event(question: str, top_k: int) -> str:
+async def send_query(question, top_k, source_ids):
     client = get_inngest_client()
-    result = await client.send(inngest.Event(
+    await client.send(inngest.Event(
         name="rag_query_pdf_ai",
-        data={"question": question, "top_k": top_k}
+        data={"question": question, "top_k": top_k, "source_ids": source_ids}
     ))
-    return result[0]
+    return client
 
-def _inngest_api_base() -> str:
-    return os.getenv("INNGEST_API_BASE", "http://127.0.0.1:8288/v1")
+def get_run_result(event_id_mock=None):
+    pass
 
-def fetch_runs(event_id: str) -> list[dict]:
-    try:
-        url = f"{_inngest_api_base()}/events/{event_id}/runs"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-    except: return []
+def _inngest_api_base(): return os.getenv("INNGEST_API_BASE", "http://127.0.0.1:8288/v1")
 
-def wait_for_run_output(event_id: str) -> dict:
+def wait_for_run_output(event_id):
     start = time.time()
     while time.time() - start < 60:
-        runs = fetch_runs(event_id)
-        if runs:
-            run = runs[0]
-            if run.get("status") in ("Completed", "Succeeded", "Success"):
-                return run.get("output") or {}
+        try:
+            url = f"{_inngest_api_base()}/events/{event_id}/runs"
+            resp = requests.get(url)
+            if resp.status_code == 200:
+                runs = resp.json().get("data", [])
+                if runs:
+                    run = runs[0]
+                    if run.get("status") == "Completed":
+                        return run.get("output", {})
+        except: pass
         time.sleep(1)
     return {}
 
-# --- SIDEBAR ---
+async def trigger_and_wait(question, top_k, source_ids):
+    client = get_inngest_client()
+    ids = await client.send(inngest.Event(
+        name="rag_query_pdf_ai",
+        data={"question": question, "top_k": top_k, "source_ids": source_ids}
+    ))
+    return wait_for_run_output(ids[0])
+
+#SIDEBAR UI
 with st.sidebar:
-    st.title("📂 Knowledge Base")
-    uploaded = st.file_uploader("Upload PDF Documents", type=["pdf"])
-    if uploaded:
-        with st.status("Analyzing PDF...", expanded=False):
-            path = save_uploaded_pdf(uploaded)
-            asyncio.run(send_rag_ingest_event(path))
-        st.success(f"File Ready: {uploaded.name}")
-    st.divider()
-    top_k = st.slider("Context Detail (Chunks)", 1, 20, 5)
-
-# --- MAIN INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🤖 AI Intelligence Hub</h1>", unsafe_allow_html=True)
-
-with st.container():
-    with st.form("rag_query_form", clear_on_submit=False):
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            question = st.text_input("What would you like to know?", placeholder="Ask a question about your documents...")
-        with col2:
-            st.write("##") # Vertical alignment
-            submitted = st.form_submit_button("Search")
-
-if submitted and question.strip():
-    with st.spinner("🔍 Deep-scanning documents..."):
-        event_id = asyncio.run(send_rag_query_event(question.strip(), int(top_k)))
-        output = wait_for_run_output(event_id)
-        answer = output.get("answer", "")
-        sources = output.get("sources", [])
-
-    # Displaying the High-Contrast Answer Card
-    st.markdown(f"""
-        <div class="answer-card">
-            <h3>Result Found</h3>
-            <p>{answer or "No matching information was found in your documents."}</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.title("📂 DocuMind")
     
-    if sources:
-        st.markdown("### 📚 Reference Citations")
-        source_html = "".join([f'<span class="source-tag">📄 {s}</span>' for s in sources])
-        st.markdown(source_html, unsafe_allow_html=True)
+    compare_mode = st.toggle("Compare Mode", value=False)
+    
+    st.divider()
+    
+    uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
+    if uploaded_file:
+        if uploaded_file.name not in st.session_state.uploaded_files:
+            with st.status("Ingesting...", expanded=False):
+                path = save_uploaded_pdf(uploaded_file)
+                asyncio.run(send_ingest(path))
+                st.session_state.uploaded_files.append(uploaded_file.name)
+                st.session_state.last_uploaded = uploaded_file.name
+            st.success(f"Added: {uploaded_file.name}")
+
+    st.divider()
+
+    target_files = []
+    
+    if compare_mode:
+        st.info("📊 **Comparison Mode Active**\nSelect 2 or more files to analyze differences.")
+        target_files = st.multiselect(
+            "Select Documents:",
+            options=st.session_state.uploaded_files,
+            default=st.session_state.uploaded_files[:2] if len(st.session_state.uploaded_files) >= 2 else st.session_state.uploaded_files
+        )
+    else:
+        st.info("💬 **Chat Mode Active**\nFocus on one document at a time.")
+        idx = 0
+        if st.session_state.last_uploaded in st.session_state.uploaded_files:
+            idx = st.session_state.uploaded_files.index(st.session_state.last_uploaded)
+            
+        selected_file = st.selectbox(
+            "Select Document:",
+            options=st.session_state.uploaded_files,
+            index=idx if st.session_state.uploaded_files else None
+        )
+        if selected_file:
+            target_files = [selected_file] # Wrap single file in a list
+
+#MAIN PAGE
+st.title("🤖 AI Intelligence Hub")
+
+if not target_files:
+    st.warning("👈 Please upload or select a document in the sidebar to begin.")
 else:
-    if not submitted:
-        st.write("---")
-        st.info("💡 Tip: Upload a PDF in the sidebar first, then type your question above.")
+    if compare_mode:
+        st.caption(f"Comparing: {', '.join(target_files)}")
+    else:
+        st.caption(f"Chatting with: {target_files[0]}")
+
+    with st.form("query_form"):
+        col1, col2 = st.columns([5, 1])
+        question = col1.text_input("Question:", placeholder="Ask something about the selected file(s)...")
+        col2.write("##")
+        submitted = col2.form_submit_button("Ask")
+
+    if submitted and question:
+        with st.spinner("Analyzing documents..."):
+            output = asyncio.run(trigger_and_wait(question, 5, target_files))
+            
+            answer = output.get("answer", "No response generated.")
+            sources = output.get("sources", [])
+
+        #Display The Result
+        st.markdown(f"""
+            <div class="answer-card">
+                <h3>Analysis Result</h3>
+                <p>{answer}</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        if sources:
+            st.markdown("#### Sources Used:")
+            #Unique sources only
+            unique_src = list(set(sources))
+            tags = "".join([f'<span class="source-tag">📄 {s}</span>' for s in unique_src])
+            st.markdown(tags, unsafe_allow_html=True)

@@ -6,18 +6,18 @@ from inngest.experimental import ai
 from dotenv import load_dotenv
 import uuid
 import os
-import datetime
 from data_loader import load_and_chunk_pdf, embed_texts
 from vector_db import QdrantStorage
-from custom_types import RAGChunkAndSrc, RAGUpsertResult, RAGQueryResult, RAGSearchResult
+from custom_types import RAGChunkAndSrc, RAGUpsertResult, RAGSearchResult
+from qdrant_client import models 
 
-load_dotenv()  #it load enviorment variable inside of this .env file
+load_dotenv()
 
 inngest_client = inngest.Inngest(
     app_id="rag_app",
     logger=logging.getLogger("uvicorn"),
     is_production=False,
-    serializer=inngest.PydanticSerializer()  # as inngest support pydantic typing it hwlp us to define the different variables in this dynamically typed programing language
+    serializer=inngest.PydanticSerializer()
 )
 
 @inngest_client.create_function(
@@ -48,26 +48,56 @@ async def rag_ingest(ctx: inngest.Context):
     fn_id="RAG: Query PDF",
     trigger=inngest.TriggerEvent(event="rag_query_pdf_ai")
 )
-
 async def rag_query_pdf_ai(ctx: inngest.Context):
-    def _search(question: str, top_k: int = 5) -> RAGSearchResult:
-        query_vec = embed_texts([question])[0]
-        store = QdrantStorage()
-        found = store.search(query_vec, top_k)
-        return RAGSearchResult(contexts=found["contexts"], sources=found["sources"])
-
+    # 1. Get inputs
+    target_sources = ctx.event.data.get("source_ids", []) 
     question = ctx.event.data["question"]
     top_k = int(ctx.event.data.get("top_k", 5))
 
-    found = await ctx.step.run("embed-and-search", lambda: _search(question, top_k), output_type=RAGSearchResult)
+    def _search(question: str, top_k: int, target_sources: list[str]) -> RAGSearchResult:
+        query_vec = embed_texts([question])[0]
+        store = QdrantStorage()
+        
+        q_filter = None
+        if target_sources:
+            q_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source", 
+                        match=models.MatchAny(any=target_sources)
+                    )
+                ]
+            )
+            
+        found = store.search(query_vec, top_k, query_filter=q_filter)
+        return RAGSearchResult(contexts=found["contexts"], sources=found["sources"])
 
-    context_block = "\n\n".join(f"- {c}" for c in found.contexts)
-    user_content = (
-        "Use the following context to answer the question.\n\n"
-        f"Context:\n{context_block}\n\n"
-        f"Question: {question}\n"
-        "Answer concisely using the context above."
-    )
+    found = await ctx.step.run("embed-and-search", lambda: _search(question, top_k, target_sources), output_type=RAGSearchResult)
+
+    context_block = ""
+    for i, txt in enumerate(found.contexts):
+        context_block += f"\n--- SOURCE: {found.sources[i]} ---\n{txt}\n"
+
+    if len(target_sources) > 1:
+        user_content = (
+            "You are an expert Document Analyst. The user has provided multiple documents.\n"
+            "Your task is to COMPARE and CONTRAST the information found in them.\n\n"
+            f"Context:\n{context_block}\n\n"
+            f"Question: {question}\n\n"
+            "Guidelines:\n"
+            "1. Explicitly mention which document each fact comes from.\n"
+            "2. Highlight contradictions or differences.\n"
+            "3. Use a Markdown table if comparing numerical data."
+        )
+    else:
+        user_content = (
+            "You are a helpful AI assistant. Answer the question based strictly on the provided context.\n\n"
+            f"Context:\n{context_block}\n\n"
+            f"Question: {question}\n\n"
+            "Guidelines:\n"
+            "1. Be concise and direct.\n"
+            "2. Do not hallucinate information not present in the context."
+        )
 
     adapter = ai.openai.Adapter(
         auth_key=os.getenv("OPENAI_API_KEY"),
@@ -81,7 +111,7 @@ async def rag_query_pdf_ai(ctx: inngest.Context):
             "max_tokens": 1024,
             "temperature": 0.2,
             "messages": [
-                {"role": "system", "content": "You answer questions using only the provided context"},
+                {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": user_content}
             ]
         }
@@ -91,5 +121,4 @@ async def rag_query_pdf_ai(ctx: inngest.Context):
     return {"answer": answer, "sources": found.sources, "num_contexts": len(found.contexts)}
 
 app = FastAPI()
-
 inngest.fast_api.serve(app, inngest_client, functions=[rag_ingest, rag_query_pdf_ai])

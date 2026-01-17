@@ -1,12 +1,12 @@
 from qdrant_client import QdrantClient
+from qdrant_client import models
 from qdrant_client.models import VectorParams, Distance, PointStruct
 
 class QdrantStorage:
     def __init__(self, url="http://localhost:6333", collection="docs", dim=3072):
         self.client = QdrantClient(url=url, timeout=30)
-        self.collection = collection
+        self.collection = collection 
         
-        # Fixed typo: self.cient -> self.client
         if not self.client.collection_exists(self.collection):
             self.client.create_collection(
                 collection_name=self.collection,
@@ -20,30 +20,22 @@ class QdrantStorage:
         ]
         self.client.upsert(self.collection, points=points)
 
-    def search(self, query_vector, top_k: int = 5):
-        # Use query_points instead of search for qdrant-client v1.10+
+    def search(self, query_vector, top_k: int = 5, query_filter=None): 
         response = self.client.query_points(
-            collection_name=self.collection,
+            collection_name=self.collection, 
             query=query_vector,
             with_payload=True,
-            limit=top_k
+            limit=top_k,
+            query_filter=query_filter
         )
         
-        # In the new API, the hits are located in the .points attribute
         results = response.points
-
         contexts = []
-        sources = set()
+        sources = [] 
 
         for r in results:
-            # The payload is directly accessible on the point object
             payload = r.payload or {}
-            text = payload.get("text", "")
-            source = payload.get("source", "unknown") 
-            
-            if text:
-                contexts.append(text)
-                sources.add(source)
+            contexts.append(payload.get("text", ""))
+            sources.append(payload.get("source", "unknown"))
 
-        # Note: Changed key to 'sources' to match your main.py expectations
-        return {"contexts": contexts, "sources": list(sources)}
+        return {"contexts": contexts, "sources": sources}
