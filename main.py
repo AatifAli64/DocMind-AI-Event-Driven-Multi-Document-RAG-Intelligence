@@ -87,7 +87,7 @@ async def rag_query_pdf_ai(ctx: inngest.Context):
             "Guidelines:\n"
             "1. Explicitly mention which document each fact comes from.\n"
             "2. Highlight contradictions or differences.\n"
-            "3. Use a Markdown table if comparing numerical data."
+            "3. You MUST present your final answer as a Markdown comparison table, with columns for each document source."
         )
     else:
         user_content = (
